@@ -69,28 +69,49 @@ TRANSLATE_PROMPT = r"""
 分成两次翻译，并且打印每一次结果：
 1. 根据英文内容直译，保持原有格式，不要遗漏任何信息
 2. 根据第一次直译的结果重新意译，遵守原意的前提下让内容更通俗易懂、符合中文表达习惯，但要保留原有格式不变
-3. 将意译结果放入到 {{}} 中, 方便下一步提取
 
-返回格式如下，"{xxx}"表示占位符：
-
+返回格式：
 ### 直译
-{直译结果}
+(直译内容)
 
-####
+------ BEGIN TRANSLATION ------
+(意译内容)
+------ END TRANSLATION ------
 
-### 意译
-{意译结果}
+示例：
+### 直译
+Transformer 模型[20] 使用 token 处理输入。
 
-现在请翻译以下内容为简体中文：
+------ BEGIN TRANSLATION ------
+Transformer架构[20]通过token分解的方式处理输入文本...
+------ END TRANSLATION ------
+
+请严格遵循此格式，现在翻译：
 """
 from concurrent.futures import ThreadPoolExecutor
 import re
 
-def extract_braces_content(text):
-    # 使用正则表达式匹配 {{}} 内的内容（非贪婪模式）
-    matches = re.findall(r'\{\{(.*?)\}\}', text, flags=re.DOTALL)
-    # 去除前后空格（可选）
-    return [match.strip() for match in matches]
+# def extract_braces_content(text):
+#     # 使用正则表达式匹配 {{}} 内的内容（非贪婪模式）
+#     matches = re.findall(r'\{\{\{(.*?)\}\}\}', text, flags=re.DOTALL)
+#     # 去除前后空格（可选）
+#     return [match.strip() for match in matches]
+
+
+def extract_translation(response: str) -> str:
+    """
+    从模型响应中提取 ------ BEGIN TRANSLATION ------ 和 ------ END TRANSLATION ------ 之间的内容
+    返回去除前后空格的纯文本结果，若未找到返回 None
+    """
+    pattern = r"------ BEGIN TRANSLATION ------\n(.*?)\n------ END TRANSLATION ------"
+    match = re.search(pattern, response, re.DOTALL)
+    
+    if match:
+        # 清理首尾空白并去除可能的多余空行
+        cleaned = match.group(1).strip()
+        return re.sub(r'\n{2,}', '\n', cleaned)  # 合并连续空行
+    return None
+
 
 def split_markdown_by_headings(md_content):
     """按标题层级拆分markdown文档为更细粒度的段落"""
@@ -121,14 +142,19 @@ def translate_section(section):
                 {"role": "system", "content": TRANSLATE_PROMPT},
                 {"role": "user", "content": section},
             ],
-            temperature=0.5,
+            temperature=0.1,
             max_tokens=128000,
         )
         trans_tex = response.choices[0].message.content
         print(f"\n\n\nraw output: {trans_tex}")
         if "</think>" in trans_tex:
             trans_tex = trans_tex.split('</think>')[-1]
-        result = "\n".join(extract_braces_content(trans_tex.strip()))
+        
+        yiyi_trans = extract_translation(trans_tex.strip())
+        if yiyi_trans: 
+            result = yiyi_trans
+        else:
+            result = ""
         return result
     except Exception as e:
         print(f"⚠️ 翻译失败: {str(e)}")
